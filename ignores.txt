@@ -1,0 +1,1 @@
+.json, .xml, .yaml, .yml, .ini, .config, .md, .txt, .rst, .png, .jpg, .jpeg, .gif, .bmp, .svg, .ico, .zip, .tar, .gz, .rar, .7z, .log, .pdf, .doc, .docx, .xls, .xlsx, .gitignore, LICENSE
