@@ -1,18 +1,32 @@
 from flask import Flask, render_template, request, redirect
 from PIL import Image, ImageDraw
 from collections import Counter
+from dotenv import load_dotenv
 from bs4 import BeautifulSoup
 from io import BytesIO
 import requests
 import base64
 import io
+import os
 
 app = Flask(__name__, template_folder="templates", static_folder="static", static_url_path="/")
 
 def fetchProfileInfo(username):
-    exclude_dirs = "assets, public "
-    exclude_files = " .json, .xml, .yaml, .yml, .ini, .config, .md, .txt, .rst, .png, .jpg, .jpeg, .gif, .bmp, .svg, .ico, .zip, .tar, .gz, .rar, .7z, .log, .pdf, .doc, .docx, .xls, .xlsx, .gitignore, LICENSE"
-    exclude = exclude_files.replace(" ", "")
+    # Auth is needed to get 5,000 requests per hour on Github API
+    # Your personal access token
+    load_dotenv()
+    token = os.getenv("GITHUB_PERSONAL_ACCESS_TOKEN")
+
+    # Headers for authentication
+    headers = {
+        'Authorization': f'Token {token}'
+    }
+    
+    # exclude_dirs = "assets, public "
+    # exclude_files = " .json, .xml, .yaml, .yml, .ini, .config, .md, .txt, .rst, .png, .jpg, .jpeg, .gif, .bmp, .svg, .ico, .zip, .tar, .gz, .rar, .7z, .log, .pdf, .doc, .docx, .xls, .xlsx, .gitignore, LICENSE"
+    # exclude = exclude_files.replace(" ", "")
+
+    includes = (".py", ".pyc", ".pyo", ".pyd", ".java", ".class", ".jar", ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".c", ".h", ".cpp", ".cxx", ".cc", ".hpp", ".hxx", ".cs", ".dart", ".gd", ".rb", ".rake", ".gemspec", ".php", ".php3", ".php4", ".php5", ".phtml", ".swift", ".go", ".rs", ".kt", ".kts", ".ts", ".tsx", ".html", ".htm", ".xhtml", ".css", ".sql", ".sh", ".bash", ".zsh", ".pl", ".pm", ".r", ".R", ".rdata", ".rds", ".m", ".mat", ".mdl", ".m", ".h", ".scala", ".sc", ".groovy", ".gvy", ".gy", ".asm", ".s", ".vb", ".vba", ".vbs", ".fs", ".fsx", ".fsi", ".pl", ".lisp", ".lsp", ".cl", ".scm", ".ss", ".tcl", ".as", ".cls", ".trigger", ".sol", ".ino", ".tex", ".sty", ".cls", ".sb", ".sb2", ".sb3")
 
     # Send the GET request
     html_source = requests.get(f"https://github.com/{username}?tab=repositories").text
@@ -27,6 +41,10 @@ def fetchProfileInfo(username):
         languages = []
 
         for i in profile:
+            found_lang = i.find("span", itemprop="programmingLanguage")
+            if found_lang is not None:
+                languages.append(found_lang.get_text())
+            print(languages)
             timestamps.append(i.find("relative-time").text)
             last_updated = i.find("relative-time").text
             if "4" == last_updated[-1]:
@@ -34,41 +52,41 @@ def fetchProfileInfo(username):
             elif "3" == last_updated[-1]:
                 repo_list.append(i.find("a"))
 
-        total = 0
-        new_total = 0
-
         print("This year:")
         for html_tag in new_repo_list:
             repo_name = html_tag.get("href")
-            response = requests.get(f"https://api.codetabs.com/v1/loc?github={repo_name[1:]}&ignored={exclude}")
-            data = response.json()
+            url = f"https://api.github.com/repos{repo_name}/contents"
 
-            # Check if the response is a list
-            if isinstance(data, list):
-                languages.extend([item['language'] for item in data[:-1]])
-                lines_of_code = data[-1]['linesOfCode']
-                new_total += lines_of_code
-                print(f"LOC of {repo_name}: {lines_of_code}")
-            else:
-                print(f"Unexpected response format for repository {repo_name}: {data}")
+            def get_contents(url):
+                response = requests.get(url, headers=headers)
+                if response.status_code != 200:
+                    print(f"Error fetching {url}: {response.status_code}")
+                    return []
 
-        print("Last year:")
-        for html_tag in repo_list:
-            repo_name = html_tag.get("href")
-            response = requests.get(f"https://api.codetabs.com/v1/loc?github={repo_name[1:]}&ignored={exclude}")
-            data = response.json()
+                contents = response.json()
+                return contents
 
-            # Check if the response is a list
-            if isinstance(data, list):
-                languages.extend([item['language'] for item in data[:-1]])
-                lines_of_code = data[-1]['linesOfCode']
-                total += lines_of_code
-                print(f"LOC of {repo_name}: {lines_of_code}")
-            else:
-                print(f"Unexpected response format for repository {repo_name}: {data}")
+            # Only counts this year's LOC
+            def process_contents(contents):
+                total = 0
+                for item in contents:
+                    if item['type'] == 'file':
+                        # Only count lines in certain file types (e.g., .py, .js, .java, etc.)
+                        if item['name'].endswith(includes):
+                            file_url = item['download_url']
+                            file_response = requests.get(f"{file_url}", headers=headers)
+                            print(file_response.status_code)
+                            if file_response.status_code == 200:
+                                total += len(file_response.text.splitlines())
+                    elif item['type'] == 'dir':
+                        # Recursively process directories
+                        process_contents(get_contents(item['url']))
+                return total
+            
+            # Start processing the repository contents
+            new_total = process_contents(get_contents(url))
 
         print('You wrote ', new_total, ' lines of code this year!')
-        print('And also ', total, ' lines of code last year')
     else:
         # If the request was not successful, print the status code
         print('Failed to retrieve data')
@@ -78,7 +96,7 @@ def fetchProfileInfo(username):
     fav_lang = counter.most_common()[:5]
 
     image_url = "https://drive.usercontent.google.com/u/1/uc?id=1dS9vOVdmAe6_EVZa1foetLGcfQ2BTIYY&export=download"
-    response = requests.get(image_url)
+    response = requests.get(image_url, headers=headers)
     img = Image.open(BytesIO(response.content))
 
     # Get a drawing context
@@ -118,4 +136,4 @@ def result():
         return redirect("/")
 
 if __name__ == "__main__":
-    app.run()
+    app.run(debug=True)
