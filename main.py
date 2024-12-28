@@ -10,6 +10,7 @@ import io
 import os
 
 app = Flask(__name__, template_folder="templates", static_folder="static", static_url_path="/")
+new_total = 0
 
 def fetchProfileInfo(username):
     # Auth is needed to get 5,000 requests per hour on Github API
@@ -39,6 +40,7 @@ def fetchProfileInfo(username):
         new_repo_list = []
         timestamps = []
         languages = []
+        global new_total
 
         for i in profile:
             found_lang = i.find("span", itemprop="programmingLanguage")
@@ -67,24 +69,22 @@ def fetchProfileInfo(username):
                 return contents
 
             # Only counts this year's LOC
-            def process_contents(contents):
-                total = 0
+            def process_contents(contents, total):
+                global new_total
                 for item in contents:
                     if item['type'] == 'file':
                         # Only count lines in certain file types (e.g., .py, .js, .java, etc.)
                         if item['name'].endswith(includes):
                             file_url = item['download_url']
                             file_response = requests.get(f"{file_url}", headers=headers)
-                            print(file_response.status_code)
                             if file_response.status_code == 200:
-                                total += len(file_response.text.splitlines())
+                                new_total += int(len(file_response.text.splitlines()))
                     elif item['type'] == 'dir':
                         # Recursively process directories
-                        process_contents(get_contents(item['url']))
-                return total
+                        process_contents(get_contents(item['url']), total)
             
             # Start processing the repository contents
-            new_total = process_contents(get_contents(url))
+            process_contents(get_contents(url), new_total)
 
         print('You wrote ', new_total, ' lines of code this year!')
     else:
